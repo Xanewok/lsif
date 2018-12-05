@@ -1,0 +1,22 @@
+language: rust
+dist: trusty
+sudo: false
+branches:
+  except:
+  - staging.tmp
+  - trying.tmp
+cache:
+  cargo: true
+  timeout: 300
+# Quicker to fetch that during the build than to transmit as part of the cache
+before_cache:
+- rm -rf /home/travis/.cargo/registry
+os:
+- linux
+- osx
+- windows
+rust:
+- nightly
+env:
+  global:
+  - RUST_BACKTRACE=1
