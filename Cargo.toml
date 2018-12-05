@@ -6,6 +6,7 @@ edition = "2018"
 description = "Types for Language Server Index Format (LSIF)"
 repository = "https://github.com/Xanewok/lsif"
 license = "Apache-2.0/MIT"
+readme = "README.md"
 
 [badges]
 travis-ci = { repository = "Xanewok/lsif" }
