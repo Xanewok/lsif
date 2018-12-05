@@ -3,5 +3,8 @@ name = "lsif"
 version = "0.0.1"
 authors = ["Igor Matuszewski <Xanewok@gmail.com>"]
 edition = "2018"
+description = "Types for Language Server Index Format (LSIF)"
+repository = "https://github.com/Xanewok/lsif"
+license = "Apache-2.0/MIT"
 
 [dependencies]
