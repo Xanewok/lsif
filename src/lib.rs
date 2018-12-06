@@ -3,10 +3,28 @@ extern crate serde_derive;
 
 extern crate languageserver_types as lsp;
 
+pub use lsp::Url;
+pub use lsp::{NumberOrString, Range, Position};
+
+pub type RangeId = lsp::NumberOrString;
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum LocationOrRangeId {
+    Location(lsp::Location),
+    RangeId(RangeId)
+}
+
+macro_rules! result_of {
+    ($x: tt) => {
+        <lsp::lsp_request!($x) as lsp::request::Request>::Result
+    }
+}
+
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
-    id: lsp::NumberOrString,
+    pub id: lsp::NumberOrString,
     #[serde(flatten)]
     data: Element
 }
@@ -16,19 +34,91 @@ pub struct Entry {
 #[serde(tag = "type")]
 pub enum Element {
     Vertex(Vertex),
-    Edge(Edge)
+    Edge(Edge),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(tag = "label")]
 pub enum Vertex {
+    /// https://github.com/Microsoft/language-server-protocol/blob/master/indexFormat/specification.md#the-project-vertex
+    Project(Project),
     Document(Document),
-    Range(lsp::Range)
+    /// https://github.com/Microsoft/language-server-protocol/blob/master/indexFormat/specification.md#ranges
+    Range(lsp::Range),
+    /// https://github.com/Microsoft/language-server-protocol/blob/master/indexFormat/specification.md#result-set
+    ResultSet(ResultSet),
+
+    // Method results
+    DefinitionResult { result: DefinitionResultType },
+    // TODO: Fix ones below to use the { result: LSIFType } format
+    HoverResult(result_of!("textDocument/hover")),
+    ReferenceResult(result_of!("textDocument/references")),
+    // Blocked on https://github.com/gluon-lang/languageserver-types/pull/86
+    // ImplementationResult(result_of!("textDocument/implementation")),
+    // Blocked on https://github.com/gluon-lang/languageserver-types/pull/86
+    // TypeDefinitionResult(result_of!("textDocument/typeDefinition")),
+    FoldingRangeResult(result_of!("textDocument/foldingRange")),
+    DocumentLinkResult(result_of!("textDocument/documentLink")),
+    DocumentSymbolResult(result_of!("textDocument/documentSymbol")),
+    // TODO (these below and more)
+    DiagnosticResult,
+    ExportResult,
+    ExternalImportResult,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub enum Edge {}
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "label")]
+pub enum Edge {
+    Contains(EdgeData),
+    RefersTo(EdgeData),
+    Item(Item),
+
+    // Methods
+    #[serde(rename = "textDocument/definition")]
+    Definition(EdgeData),
+    #[serde(rename = "textDocument/declaration")]
+    Declaration(EdgeData),
+    #[serde(rename = "textDocument/hover")]
+    Hover(EdgeData),
+    #[serde(rename = "textDocument/references")]
+    References(EdgeData),
+    #[serde(rename = "textDocument/implementation")]
+    Implementation(EdgeData),
+    #[serde(rename = "textDocument/typeDefinition")]
+    TypeDefinition(EdgeData),
+    #[serde(rename = "textDocument/foldingRange")]
+    FoldingRange(EdgeData),
+    #[serde(rename = "textDocument/documentLink")]
+    DocumentLink(EdgeData),
+    #[serde(rename = "textDocument/documentSymbol")]
+    DocumentSymbol(EdgeData),
+    #[serde(rename = "textDocument/diagnostic")]
+    Diagnostic(EdgeData),
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EdgeData {
+    in_v: lsp::NumberOrString,
+    out_v: lsp::NumberOrString,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DefinitionResultType {
+    Scalar(LocationOrRangeId),
+    Array(LocationOrRangeId),
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "property")]
+pub enum Item {
+    Definition(EdgeData),
+    Reference(EdgeData),
+}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,13 +128,22 @@ pub struct Document {
     language_id: Language
 }
 
-// /// Represents a location inside a resource, such as a line inside a text file.
-// #[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
-// pub struct Location {
-//     #[serde(with = "url_serde")]
-//     pub uri: lsp::Url,
-//     pub range: lsp::Range,
-// }
+/// https://github.com/Microsoft/language-server-protocol/blob/master/indexFormat/specification.md#result-set
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResultSet {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    key: Option<String>,
+}
+
+/// https://github.com/Microsoft/language-server-protocol/blob/master/indexFormat/specification.md#the-project-vertex
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Project {
+    #[serde(with = "url_serde")]
+    project_file: lsp::Url,
+    language_id: Language
+}
 
 /// https://github.com/Microsoft/language-server-protocol/issues/213
 /// For examples, see: https://code.visualstudio.com/docs/languages/identifiers.
@@ -93,5 +192,111 @@ mod tests {
 
         assert_eq!(serde_json::to_string(&data).unwrap(), text);
         assert_eq!(serde_json::from_str::<Entry>(&text).unwrap(), data);
+    }
+
+    #[test]
+    fn contains() {
+        let data = Entry {
+            id: lsp::NumberOrString::Number(5),
+            data: Element::Edge(Edge::Contains(EdgeData {
+                in_v: lsp::NumberOrString::Number(4),
+                out_v: lsp::NumberOrString::Number(1),
+            })),
+        };
+
+        let text = r#"{ "id": 5, "type": "edge", "label": "contains", "outV": 1, "inV": 4}"#
+            .replace(' ', "");
+
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&text).unwrap(), serde_json::to_value(&data).unwrap());
+    }
+
+    #[test]
+    fn refers_to() {
+        let data = Entry {
+            id: lsp::NumberOrString::Number(5),
+            data: Element::Edge(Edge::RefersTo(EdgeData {
+                in_v: lsp::NumberOrString::Number(2),
+                out_v: lsp::NumberOrString::Number(3),
+            })),
+        };
+
+        let text = r#"{ "id": 5, "type": "edge", "label": "refersTo", "outV": 3, "inV": 2}"#
+            .replace(' ', "");
+
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&text).unwrap(), serde_json::to_value(&data).unwrap());
+    }
+
+    #[test]
+    fn result_set() {
+        let data = Entry {
+            id: lsp::NumberOrString::Number(2),
+            data: Element::Vertex(Vertex::ResultSet(ResultSet { key: None })),
+        };
+
+        let text = r#"{ "id": 2, "type": "vertex", "label": "resultSet" }"#
+            .replace(' ', "");
+
+        assert_eq!(serde_json::to_string(&data).unwrap(), text);
+        assert_eq!(serde_json::from_str::<Entry>(&text).unwrap(), data);
+
+        let data = Entry {
+            id: lsp::NumberOrString::Number(4),
+            data: Element::Vertex(Vertex::ResultSet(ResultSet { key: Some(String::from("hello")) })),
+        };
+
+        let text = r#"{ "id": 4, "type": "vertex", "label": "resultSet", "key": "hello" }"#
+            .replace(' ', "");
+
+        assert_eq!(serde_json::to_string(&data).unwrap(), text);
+        assert_eq!(serde_json::from_str::<Entry>(&text).unwrap(), data);
+    }
+
+    #[test]
+    fn definition() {
+        let data = Entry {
+            id: lsp::NumberOrString::Number(21),
+            data: Element::Edge(Edge::Item(Item::Definition(EdgeData {
+                in_v: lsp::NumberOrString::Number(18),
+                out_v: lsp::NumberOrString::Number(16),
+            }))),
+        };
+
+        let text = r#"{ "id": 21, "type": "edge", "label": "item", "property": "definition", "outV": 16, "inV": 18}"#
+            .replace(' ', "");
+
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&text).unwrap(), serde_json::to_value(&data).unwrap());
+    }
+
+    mod methods {
+        use super:: *;
+
+        #[test]
+        fn references() {
+            let data = Entry {
+                id: lsp::NumberOrString::Number(17),
+                data: Element::Edge(Edge::References(EdgeData {
+                    in_v: lsp::NumberOrString::Number(16),
+                    out_v: lsp::NumberOrString::Number(15),
+                })),
+            };
+
+            let text = r#"{ "id": 17, "type": "edge", "label": "textDocument/references", "outV": 15, "inV": 16 }"#;
+
+            assert_eq!(serde_json::from_str::<serde_json::Value>(&text).unwrap(), serde_json::to_value(&data).unwrap());
+        }
+
+        #[test]
+        fn definition() {
+            let data = Entry {
+                id: lsp::NumberOrString::Number(13),
+                data: Element::Vertex(Vertex::DefinitionResult {
+                    result: DefinitionResultType::Scalar(LocationOrRangeId::RangeId(lsp::NumberOrString::Number(7))),
+                }),
+            };
+
+            let text = r#"{ "id": 13, "type": "vertex", "label": "definitionResult", "result": 7 }"#;
+
+            assert_eq!(serde_json::from_str::<serde_json::Value>(&text).unwrap(), serde_json::to_value(&data).unwrap());
+        }
     }
 }
